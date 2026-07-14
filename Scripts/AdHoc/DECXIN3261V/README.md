@@ -91,6 +91,46 @@ To save frame images for later Rerun replay, record the sequence while mapping:
   --record-sequence
 ```
 
+For battery-powered outdoor capture, record only rectified stereo images at 10 Hz and show left/right images in Rerun. This does not run MAC-VO, so it does not require CUDA and does not show a live trajectory:
+
+```bash
+./run_decxin3261v_live_wjy.sh \
+  --capture-only \
+  --record-sequence \
+  --useRR \
+  --vo-fps 10 \
+  --rr-every 1 \
+  --status-every 30
+```
+
+Stop with `Ctrl+C`, then run offline mapping from the saved capture folder. Start with `--target-fps 3` to match the stable realtime mapping cadence:
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --target-fps 3 \
+  --timing
+```
+
+After the 3 Hz result is stable, full-frame offline mapping can be tested for comparison. Full-frame mode feeds every 10/30 Hz captured frame to MAC-VO, which is not equivalent to realtime `--vo-fps 3`:
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --timing
+```
+
+For a fixed-rate approximation without timestamps, use `--stride`; for example, `--stride 10` turns a 30 Hz recording into roughly 3 Hz:
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --stride 10 \
+  --timing
+```
+
+Offline mapping defaults to `Config/Experiment/MACVO/MACVO_DECXIN3261V_Mapping.yaml`, not `MACVO_DECXIN3261V_Quality.yaml`. Both use the same `MACVO_FrontendCov.pth` frontend model and similar quality-oriented parameters, but the Mapping config enables `mapping: true` and `mapping_num_point: 2000`; the Quality config has `mapping: false`.
+
 ## 6. Reopen Saved Frame-by-frame Map in Rerun
 
 Open the latest saved mapping result:

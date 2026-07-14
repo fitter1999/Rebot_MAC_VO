@@ -826,6 +826,30 @@ class WebDisplay:
             self.render_thread.join(timeout=2.0)
 
 
+class RerunImageDisplay:
+    def __init__(self, application_id: str, every: int) -> None:
+        self.application_id = application_id
+        self.every = max(every, 1)
+        self.rr = None
+
+    def start(self) -> None:
+        try:
+            import rerun as rr
+        except ImportError as exc:
+            raise RuntimeError("Rerun is not installed in this environment; install rerun-sdk or run without --useRR.") from exc
+        self.rr = rr
+        rr.init(self.application_id, spawn=False)
+        rr.spawn(connect=True)
+        Logger.write("info", "Rerun image-only UI enabled.")
+
+    def update(self, pair: StereoPair, frame_idx: int) -> None:
+        if self.rr is None or frame_idx % self.every != 0:
+            return
+        self.rr.set_time_sequence("frame_idx", frame_idx)
+        self.rr.log("/world/macvo/cam_left", self.rr.Image(pair.left_rgb).compress())
+        self.rr.log("/world/macvo/cam_right", self.rr.Image(pair.right_rgb).compress())
+
+
 class RerunLiveDisplay:
     def __init__(
         self,
@@ -1335,18 +1359,50 @@ def run_realtime_from_reader(
         Logger.write("info", f"Camera warmup done: {format_stats(reader.stats())}")
 
         if args.capture_only:
-            frames_to_capture = args.max_frames if args.max_frames > 0 else 90
-            preview_dir = Path(args.preview_dir) if args.preview_dir is not None else None
+            capture_result_dir: Path | None = None
+            if args.record_sequence:
+                capture_result_dir = Path(args.record_dir) if args.record_dir else Path(args.resultRoot) / time.strftime("%m_%d_%H%M%S")
+                sequence_recorder = StereoSequenceRecorder(capture_result_dir / "stereo_sequence", args.swap)
+                preview_dir = capture_result_dir / "preview"
+                Logger.write("info", f"Capture-only recording to {capture_result_dir}")
+            else:
+                preview_dir = Path(args.preview_dir) if args.preview_dir is not None else None
+
+            rr_display = RerunImageDisplay(f"MACVO-CaptureOnly@{project_suffix}", args.rr_every) if args.useRR else None
+            if rr_display is not None:
+                rr_display.start()
+
             max_skew = 0.0
-            for idx in range(frames_to_capture):
-                pair = reader.wait_for_newer(last_pair_id, args.wait_timeout)
-                if pair is None:
-                    raise RuntimeError("Timed out while waiting for stereo pair")
-                last_pair_id = pair.pair_id
-                max_skew = max(max_skew, pair.software_skew_ms)
-                if preview_dir is not None and (idx == 0 or (args.save_preview_every > 0 and idx % args.save_preview_every == 0)):
-                    save_pair_preview(pair, preview_dir, f"pair_{idx:04d}", args.swap)
+            captured = 0
+            next_capture_time = time.monotonic()
+            try:
+                while args.max_frames <= 0 or captured < args.max_frames:
+                    pair = reader.wait_for_newer(last_pair_id, args.wait_timeout)
+                    if pair is None:
+                        raise RuntimeError("Timed out while waiting for stereo pair")
+                    last_pair_id = pair.pair_id
+                    max_skew = max(max_skew, pair.software_skew_ms)
+                    now = time.monotonic()
+                    if args.vo_fps > 0 and now < next_capture_time:
+                        continue
+                    next_capture_time = max(next_capture_time + 1.0 / args.vo_fps, now)
+                    pair_for_record = rectifier.rectify_pair(pair, args.swap)
+                    if sequence_recorder is not None:
+                        sequence_recorder.write(pair_for_record, captured)
+                    if rr_display is not None:
+                        rr_display.update(pair_for_record, captured)
+                    if preview_dir is not None and (captured == 0 or (args.save_preview_every > 0 and captured % args.save_preview_every == 0)):
+                        save_pair_preview(pair_for_record, preview_dir, f"pair_{captured:04d}", False)
+                    captured += 1
+                    if captured % max(args.status_every, 1) == 0:
+                        Logger.write("info", f"Capture-only frame={captured}, capture=({format_stats(reader.stats())})")
+            except KeyboardInterrupt:
+                Logger.write("warn", f"Interrupted by user after {captured} capture-only frames; saving sequence.")
+            if sequence_recorder is not None:
+                sequence_recorder.close()
             Logger.write("info", f"Capture-only finished: {format_stats(reader.stats())}")
+            if capture_result_dir is not None:
+                Logger.write("info", f"Saved capture-only stereo sequence to {capture_result_dir}")
             if max_skew > args.max_software_skew_ms:
                 Logger.write("warn", f"Software timestamp skew exceeded threshold: max={max_skew:.3f} ms")
             return

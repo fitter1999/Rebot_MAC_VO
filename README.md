@@ -154,6 +154,52 @@ OV2710 的流程在 `Scripts/AdHoc/OV2710/` 和对应顶层脚本中，默认实
   --record-sequence
 ```
 
+拔掉电源或 CUDA 不可用时，推荐先只做 10Hz 图像采集，并用 Rerun 实时看左右目 image。这个模式不运行 MAC-VO，不需要 GPU，因此不会有实时轨迹；轨迹和地图回到室内后离线生成：
+
+```bash
+./run_decxin3261v_live_wjy.sh \
+  --capture-only \
+  --record-sequence \
+  --useRR \
+  --vo-fps 10 \
+  --rr-every 1 \
+  --status-every 30
+```
+
+结束时按一次 `Ctrl+C`，等待终端出现：
+
+```text
+Saved capture-only stereo sequence to Results_decxin3261v_live/<time_dir>
+```
+
+然后离线建图。优先按 3Hz 抽帧重建，这和最初稳定的实时 mapping 输入节奏一致：
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --target-fps 3 \
+  --timing
+```
+
+如果确认 3Hz 结果稳定，再尝试全帧离线重建；全帧模式会把 10Hz/30Hz 采集序列逐帧送入 MAC-VO，和实时 `--vo-fps 3` 的效果不同：
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --timing
+```
+
+也可以不用时间戳，直接按固定步长抽帧。例如 30Hz 采集近似抽成 3Hz：
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --stride 10 \
+  --timing
+```
+
+离线建图默认使用 `Config/Experiment/MACVO/MACVO_DECXIN3261V_Mapping.yaml`，不是 `MACVO_DECXIN3261V_Quality.yaml`。两者使用同一个 `MACVO_FrontendCov.pth` 前端模型和相近的 quality 参数；区别是 Mapping 配置开启了 `mapping: true` 和 `mapping_num_point: 2000`，用于生成逐帧地图点云。Quality 配置默认 `mapping: false`，只适合看轨迹质量，不会输出 dense mapping 点。
+
 运行结束时按一次 `Ctrl+C`，等待终端出现：
 
 ```text
@@ -193,7 +239,7 @@ stereo_sequence/     # 只有加 --record-sequence 才有
   --growth
 ```
 
-打开离线建图结果目录，脚本会自动查找里面最新的 `tensor_map.npz`：
+打开离线建图结果目录，脚本会自动查找里面最新的 `tensor_map.npz`。如果同一段数据既跑过全帧又跑过 3Hz 抽帧，建议指定具体结果目录，避免误打开旧的坏结果：
 
 ```bash
 ./run_decxin3261v_view_map_wjy.sh \
