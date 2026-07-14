@@ -172,7 +172,17 @@ OV2710 的流程在 `Scripts/AdHoc/OV2710/` 和对应顶层脚本中，默认实
 Saved capture-only stereo sequence to Results_decxin3261v_live/<time_dir>
 ```
 
-然后离线建图。优先按 3Hz 抽帧重建，这和最初稳定的实时 mapping 输入节奏一致：
+然后离线建图。大旋转、室内近距离物体较多时，优先使用 paper-like mapping 配置；它对齐原项目 `Paper_Reproduce.yaml` 的 TartanMotionNet 初值、ICP 优化和 outlier filters，同时开启 mapping：
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --target-fps 3 \
+  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
+  --timing
+```
+
+如果需要速度更快的对比，再使用默认 mapping 配置；它接近 `MACVO_Fast.yaml`，使用 StaticMotionModel 和 disp graph，速度更快但在大旋转时更容易漂：
 
 ```bash
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
@@ -186,15 +196,7 @@ Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
 ```bash
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
   --result Results_decxin3261v_live/<time_dir> \
-  --timing
-```
-
-也可以不用时间戳，直接按固定步长抽帧。例如 30Hz 采集近似抽成 3Hz：
-
-```bash
-Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
-  --result Results_decxin3261v_live/<time_dir> \
-  --stride 10 \
+  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
   --timing
 ```
 

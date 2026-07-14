@@ -1,0 +1,96 @@
+#
+# DECXIN-3261V dense mapping config aligned with Paper_Reproduce.yaml.
+# Use this when the fast/static-motion mapping config drifts on large rotations.
+#
+
+Common:
+  device: &device cuda
+  max_depth: &max_depth auto
+
+Odometry:
+  name: MACVO-DECXIN3261V-PaperLike-Mapping
+  args:
+    device: *device
+    edgewidth: 32
+    num_point: 200
+    match_cov_default: 0.25
+    profile: false
+    mapping: true
+    mapping_num_point: 2000
+
+  cov:
+    obs:
+      type: MatchCovariance
+      args:
+        device: *device
+        kernel_size: 31
+        match_cov_default: 0.25
+        min_depth_cov: 0.05
+        min_flow_cov: 0.25
+
+  keypoint:
+    type: CovAwareSelector
+    args:
+      device: *device
+      kernel_size: 7
+      mask_width: 32
+      max_depth: *max_depth
+      max_depth_cov: 250.0
+      max_match_cov: 100.0
+
+  mappoint:
+    type: MappingPointSelector
+    args:
+      device: *device
+      max_depth: 5.0
+      max_depth_cov: 0.005
+      mask_width: 32
+
+  frontend:
+    type: CUDAGraph_FlowFormerCovFrontend
+    args:
+      device: *device
+      weight: ./Model/MACVO_FrontendCov.pth
+      enc_dtype: fp32
+      dec_dtype: fp32
+      decoder_depth: 12
+      enforce_positive_disparity: false
+
+  motion:
+    type: TartanMotionNet
+    args:
+      weight: ./Model/MACVO_posenet.pkl
+      device: *device
+
+  outlier:
+    type: FilterCompose
+    args:
+      filter_args:
+        - type: CovarianceSanityFilter
+          args:
+        - type: SimpleDepthFilter
+          args:
+            min_depth: 0.05
+            max_depth: *max_depth
+        - type: LikelyFrontOfCamFilter
+          args:
+
+  postprocess:
+    type: MotionInterpolate
+    args:
+
+  keyframe:
+    type: AllKeyframe
+    args:
+
+  optimizer:
+    type: TwoFrame_PGO
+    args:
+      device: cpu
+      vectorize: true
+      parallel: true
+      graph_type: icp
+      autodiff: true
+
+Data: !include ../Common/EvaluationDataset.yaml
+Preprocess: !include ../Common/Preprocess.yaml

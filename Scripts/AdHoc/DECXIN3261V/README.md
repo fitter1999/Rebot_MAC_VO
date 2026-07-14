@@ -103,7 +103,17 @@ For battery-powered outdoor capture, record only rectified stereo images at 10 H
   --status-every 30
 ```
 
-Stop with `Ctrl+C`, then run offline mapping from the saved capture folder. Start with `--target-fps 3` to match the stable realtime mapping cadence:
+Stop with `Ctrl+C`, then run offline mapping from the saved capture folder. For large rotations or close indoor objects, start with the paper-like mapping config. It follows the original `Paper_Reproduce.yaml` module choices, with TartanMotionNet initialization, ICP optimization, and outlier filters, while enabling mapping:
+
+```bash
+Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+  --result Results_decxin3261v_live/<time_dir> \
+  --target-fps 3 \
+  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
+  --timing
+```
+
+For a faster comparison, use the default mapping config. It is closer to `MACVO_Fast.yaml` and uses StaticMotionModel plus the disp graph, but it can drift more on large rotations:
 
 ```bash
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
@@ -117,15 +127,7 @@ After the 3 Hz result is stable, full-frame offline mapping can be tested for co
 ```bash
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
   --result Results_decxin3261v_live/<time_dir> \
-  --timing
-```
-
-For a fixed-rate approximation without timestamps, use `--stride`; for example, `--stride 10` turns a 30 Hz recording into roughly 3 Hz:
-
-```bash
-Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
-  --result Results_decxin3261v_live/<time_dir> \
-  --stride 10 \
+  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
   --timing
 ```
 
