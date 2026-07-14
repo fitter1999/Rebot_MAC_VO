@@ -107,6 +107,16 @@ Open a specific saved result:
   --growth
 ```
 
+Open the latest offline mapping result:
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_offline_mapping \
+  --growth
+```
+
+For offline results, the viewer can recover the original `stereo_sequence` from `config.yaml` when that path still exists.
+
 This replays the growing map points, a single yellow trajectory line, camera pose, and saved images when `stereo_sequence/` exists. If the result was not recorded with `--record-sequence`, only the preview image can be shown.
 
 For smoother playback on large maps:

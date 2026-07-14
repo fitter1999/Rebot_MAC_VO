@@ -193,6 +193,16 @@ stereo_sequence/     # 只有加 --record-sequence 才有
   --growth
 ```
 
+打开离线建图结果目录，脚本会自动查找里面最新的 `tensor_map.npz`：
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_offline_mapping \
+  --growth
+```
+
+如果离线结果的 `config.yaml` 里记录了原始 `stereo_sequence` 路径，脚本会自动读取原始逐帧图像。否则只能显示点云、黄色轨迹和相机位姿。
+
 例如：
 
 ```bash

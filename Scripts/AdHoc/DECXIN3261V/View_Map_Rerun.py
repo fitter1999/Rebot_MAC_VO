@@ -9,18 +9,23 @@ import cv2
 import numpy as np
 import pypose as pp
 import torch
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-DEFAULT_ROOT = Path("Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live")
+DEFAULT_ROOTS = (
+    Path("Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live"),
+    Path("Results_decxin3261v_offline_mapping"),
+    Path("Results_decxin3261v_growth"),
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open a saved DECXIN MAC-VO map in Rerun.")
-    parser.add_argument("--result", default=None, help="Result folder containing tensor_map.npz and poses.npy. Defaults to latest DECXIN mapping result.")
+    parser.add_argument("--result", default=None, help="Result folder containing tensor_map.npz, or a parent directory to search. Defaults to latest DECXIN mapping result.")
     parser.add_argument("--growth", action="store_true", help="Replay map points frame by frame instead of showing one static map.")
     parser.add_argument("--every", type=int, default=1, help="For --growth, log one frame chunk every N saved frames.")
     parser.add_argument("--max-points", type=int, default=300000, help="Maximum points shown for the static map; 0 means no limit.")
@@ -34,10 +39,82 @@ def parse_args() -> argparse.Namespace:
 
 
 def latest_result() -> Path:
-    candidates = [p for p in DEFAULT_ROOT.glob("*") if (p / "tensor_map.npz").exists()]
+    candidates: list[Path] = []
+    for root in DEFAULT_ROOTS:
+        if root.exists():
+            candidates.extend(p.parent for p in root.rglob("tensor_map.npz"))
     if not candidates:
-        raise FileNotFoundError(f"No tensor_map.npz found under {DEFAULT_ROOT}")
+        searched = ", ".join(str(p) for p in DEFAULT_ROOTS)
+        raise FileNotFoundError(f"No tensor_map.npz found under: {searched}")
     return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def resolve_result(path: str) -> Path:
+    result = Path(path).expanduser()
+    if (result / "tensor_map.npz").exists():
+        return result
+
+    candidates = [p.parent for p in result.rglob("tensor_map.npz")]
+    if not candidates:
+        raise FileNotFoundError(f"No tensor_map.npz found under {result}")
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def is_stereo_sequence(path: Path) -> bool:
+    return (path / "left").exists() and (path / "right").exists()
+
+
+def normalize_sequence_path(path: Path, base: Path) -> Path | None:
+    candidates = [path]
+    if not path.is_absolute():
+        candidates.extend([base / path, PROJECT_ROOT / path])
+
+    for candidate in candidates:
+        candidate = candidate.expanduser()
+        if is_stereo_sequence(candidate):
+            return candidate
+        nested = candidate / "stereo_sequence"
+        if is_stereo_sequence(nested):
+            return nested
+    return None
+
+
+def iter_yaml_roots(node) -> list[str]:
+    roots: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "root" and isinstance(value, str):
+                roots.append(value)
+            else:
+                roots.extend(iter_yaml_roots(value))
+    elif isinstance(node, list):
+        for value in node:
+            roots.extend(iter_yaml_roots(value))
+    return roots
+
+
+def sequence_from_yaml(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    for raw_root in iter_yaml_roots(data):
+        seq = normalize_sequence_path(Path(raw_root), path.parent)
+        if seq is not None:
+            return seq
+    return None
+
+
+def find_sequence_dir(result: Path) -> Path | None:
+    direct = normalize_sequence_path(result / "stereo_sequence", result)
+    if direct is not None:
+        return direct
+
+    for cfg in (result / "config.yaml", result / "decxin_offline_sequence.yaml"):
+        seq = sequence_from_yaml(cfg)
+        if seq is not None:
+            return seq
+    return None
 
 
 def point_filter(
@@ -102,10 +179,11 @@ def read_rgb(path: Path) -> np.ndarray | None:
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
-def sequence_image_pair(result: Path, frame_idx: int) -> tuple[np.ndarray | None, np.ndarray | None]:
+def sequence_image_pair(sequence_dir: Path | None, frame_idx: int) -> tuple[np.ndarray | None, np.ndarray | None]:
+    if sequence_dir is None:
+        return None, None
     name = f"{frame_idx:06d}.png"
-    seq = result / "stereo_sequence"
-    return read_rgb(seq / "left" / name), read_rgb(seq / "right" / name)
+    return read_rgb(sequence_dir / "left" / name), read_rgb(sequence_dir / "right" / name)
 
 
 def preview_image_pair(result: Path) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -139,7 +217,7 @@ def frame_map_indices(ranges: np.ndarray, frame_idx: int) -> np.ndarray:
 
 def main() -> None:
     args = parse_args()
-    result = Path(args.result) if args.result else latest_result()
+    result = resolve_result(args.result) if args.result else latest_result()
     map_file = result / "tensor_map.npz"
     pose_file = result / "poses.npy"
     if not map_file.exists():
@@ -151,6 +229,7 @@ def main() -> None:
     from Utility.Visualize import rr_plt
 
     tensor_map = np.load(map_file)
+    image_sequence = find_sequence_dir(result)
     poses = np.load(pose_file)[:, 1:4].astype(np.float32)
     frame_poses = tensor_map["frames//pose"].astype(np.float32) if "frames//pose" in tensor_map else None
     frame_Ks = tensor_map["frames//K"].astype(np.float32) if "frames//K" in tensor_map else None
@@ -182,7 +261,7 @@ def main() -> None:
 
     logged_preview = False
     if not args.no_images and not args.growth:
-        left, right = sequence_image_pair(result, 0)
+        left, right = sequence_image_pair(image_sequence, 0)
         if left is None and right is None:
             left, right = preview_image_pair(result)
         logged_preview = log_image_pair(rr, left, right)
@@ -209,7 +288,7 @@ def main() -> None:
             if frame_poses is not None and frame_Ks is not None and frame_idx < frame_poses.shape[0]:
                 log_camera(rr_plt, "/world/current_camera/cam_left", frame_poses[frame_idx], frame_Ks[frame_idx])
             if not args.no_images and frame_idx % max(args.image_every, 1) == 0:
-                left, right = sequence_image_pair(result, frame_idx)
+                left, right = sequence_image_pair(image_sequence, frame_idx)
                 log_image_pair(rr, left, right)
             idx = frame_map_indices(ranges, frame_idx)
             if idx.size == 0:
@@ -222,10 +301,12 @@ def main() -> None:
                 rr.Points3D(map_xyz[idx], colors=map_rgb[idx], radii=0.004),
             )
             total_logged += int(idx.size)
-        if not args.no_images and not (result / "stereo_sequence").exists():
+        if not args.no_images and image_sequence is None:
             left, right = preview_image_pair(result)
             if log_image_pair(rr, left, right):
                 print("No stereo_sequence found; logged preview/first_pair images only.")
+        if image_sequence is not None:
+            print(f"Using image sequence: {image_sequence}")
         print(f"Opened Rerun growth replay: {result} ({total_logged} mapping points logged)")
     else:
         xyz, rgb = limit_points(map_xyz[map_mask], map_rgb[map_mask], args.max_points)
