@@ -1,0 +1,81 @@
+#
+# Realtime-oriented MAC-VO config for a synchronized OV2710 stereo pair.
+# Assumes external capture throttles 30 FPS camera input down to ~10 FPS VO input.
+#
+
+Common:
+  device: &device cuda
+
+Odometry:
+  name: MACVO-OV2710-Realtime
+  args:
+    device: *device
+    edgewidth: 32
+    num_point: 100
+    match_cov_default: 0.25
+    profile: false
+    mapping: false
+
+  cov:
+    obs:
+      type: MatchCovariance
+      args:
+        device: *device
+        kernel_size: 31
+        match_cov_default: 0.25
+        min_depth_cov: 0.05
+        min_flow_cov: 0.25
+
+  keypoint:
+    type: CovAwareSelector_NoDepth
+    args:
+      device: *device
+      kernel_size: 7
+      mask_width: 32
+      max_match_cov: 100.0
+
+  mappoint:
+    type: MappingPointSelector
+    args:
+      device: *device
+      max_depth: 5.0
+      max_depth_cov: 0.005
+      mask_width: 32
+
+  frontend:
+    type: CUDAGraph_FlowFormerCovFrontend
+    args:
+      device: *device
+      weight: ./Model/MACVO_FrontendCov.pth
+      enc_dtype: fp16
+      dec_dtype: bf16
+      decoder_depth: 12
+      enforce_positive_disparity: false
+
+  motion:
+    type: StaticMotionModel
+    args:
+
+  outlier:
+    type: CovarianceSanityFilter
+    args:
+
+  postprocess:
+    type: MotionInterpolate
+    args:
+
+  keyframe:
+    type: AllKeyframe
+    args:
+
+  optimizer:
+    type: TwoFrame_PGO
+    args:
+      device: cpu
+      vectorize: true
+      parallel: true
+      graph_type: disp
+      autodiff: false
+
+Data: !include ../../Sequence/TartanAir_example.yaml
+Preprocess: !include ../Common/Preprocess.yaml

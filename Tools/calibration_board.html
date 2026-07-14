@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stereo Calibration Checkerboard</title>
+  <style>
+    :root {
+      --cell-mm: 30;
+      --screen-width-mm: 344.7;
+      --screen-px: 1920;
+      --cell-px: 120px;
+      --cols: 10;
+      --rows: 7;
+      --fg: #111;
+      --bg: #f2f2f2;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #111;
+      background: #1b1b1b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #1b1b1b;
+      overflow: hidden;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      min-height: 100vh;
+    }
+
+    .panel {
+      padding: 18px;
+      background: #f6f6f4;
+      border-right: 1px solid #c8c8c0;
+      overflow-y: auto;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 20px;
+      font-weight: 650;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin: 14px 0;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      height: 36px;
+      padding: 6px 9px;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      font-size: 15px;
+      background: white;
+    }
+
+    button {
+      height: 38px;
+      padding: 0 12px;
+      border: 1px solid #111;
+      border-radius: 4px;
+      background: #111;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: white;
+      color: #111;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .info {
+      margin-top: 12px;
+      padding: 12px;
+      background: white;
+      border: 1px solid #d3d3cc;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .stage {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      min-height: 100vh;
+      padding: 24px;
+      background: #707070;
+    }
+
+    .board-wrap {
+      position: relative;
+      display: grid;
+      gap: 12px;
+      justify-items: center;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(var(--cols), var(--cell-px));
+      grid-template-rows: repeat(var(--rows), var(--cell-px));
+      border: 2px solid #000;
+      background: white;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+    }
+
+    .cell {
+      width: var(--cell-px);
+      height: var(--cell-px);
+    }
+
+    .cell.black {
+      background: #000;
+    }
+
+    .caption {
+      padding: 6px 10px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #111;
+      font-size: 13px;
+    }
+
+    .ruler {
+      width: calc(var(--cell-px) * 5);
+      height: 18px;
+      border-left: 2px solid #111;
+      border-right: 2px solid #111;
+      border-bottom: 2px solid #111;
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .fullscreen .app {
+      display: block;
+    }
+
+    .fullscreen .panel {
+      display: none;
+    }
+
+    .fullscreen .stage {
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #808080;
+    }
+
+    .fullscreen .caption {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <h1>屏幕棋盘格标定板</h1>
+
+      <div class="field">
+        <label for="screenWidthMm">屏幕可视宽度 mm</label>
+        <input id="screenWidthMm" type="number" min="100" step="0.1" value="344.7">
+      </div>
+
+      <div class="field">
+        <label for="cellMm">格子边长 mm</label>
+        <input id="cellMm" type="number" min="5" step="0.1" value="18">
+      </div>
+
+      <div class="field">
+        <label for="innerCols">横向内角点数量</label>
+        <input id="innerCols" type="number" min="3" step="1" value="9">
+      </div>
+
+      <div class="field">
+        <label for="innerRows">纵向内角点数量</label>
+        <input id="innerRows" type="number" min="3" step="1" value="6">
+      </div>
+
+      <div class="buttons">
+        <button id="fullscreenBtn">全屏显示</button>
+        <button id="preset16Btn" class="secondary">16英寸16:10</button>
+        <button id="fitBtn" class="secondary">适配屏幕</button>
+        <button id="invertBtn" class="secondary">反色</button>
+      </div>
+
+      <div class="info" id="info"></div>
+      <div class="info">
+        使用方法：先量屏幕实际发光区域宽度，填入上方；全屏后让双目相机看屏幕，采集不同位置、距离和角度的图像。OpenCV 参数使用“内角点数量”和“格子边长”。
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="board-wrap">
+        <div class="board" id="board" aria-label="checkerboard"></div>
+        <div class="ruler"></div>
+        <div class="caption" id="caption"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const fields = {
+      screenWidthMm: document.getElementById("screenWidthMm"),
+      cellMm: document.getElementById("cellMm"),
+      innerCols: document.getElementById("innerCols"),
+      innerRows: document.getElementById("innerRows")
+    };
+    const board = document.getElementById("board");
+    const info = document.getElementById("info");
+    const caption = document.getElementById("caption");
+    const fullscreenBtn = document.getElementById("fullscreenBtn");
+    const preset16Btn = document.getElementById("preset16Btn");
+    const fitBtn = document.getElementById("fitBtn");
+    const invertBtn = document.getElementById("invertBtn");
+
+    let inverted = false;
+
+    function getNumber(input, fallback) {
+      const value = Number(input.value);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    }
+
+    function render() {
+      const screenWidthMm = getNumber(fields.screenWidthMm, 344);
+      const cellMm = getNumber(fields.cellMm, 30);
+      const innerCols = Math.max(3, Math.round(getNumber(fields.innerCols, 9)));
+      const innerRows = Math.max(3, Math.round(getNumber(fields.innerRows, 6)));
+      const cols = innerCols + 1;
+      const rows = innerRows + 1;
+      const screenPx = window.screen.width || window.innerWidth;
+      const cellPx = cellMm * screenPx / screenWidthMm;
+      const boardWidthMm = cols * cellMm;
+      const boardHeightMm = rows * cellMm;
+
+      document.documentElement.style.setProperty("--screen-width-mm", screenWidthMm);
+      document.documentElement.style.setProperty("--screen-px", screenPx);
+      document.documentElement.style.setProperty("--cell-mm", cellMm);
+      document.documentElement.style.setProperty("--cell-px", `${cellPx}px`);
+      document.documentElement.style.setProperty("--cols", cols);
+      document.documentElement.style.setProperty("--rows", rows);
+
+      board.innerHTML = "";
+      for (let r = 0; r < rows; r += 1) {
+        for (let c = 0; c < cols; c += 1) {
+          const cell = document.createElement("div");
+          const black = ((r + c) % 2 === 0) !== inverted;
+          cell.className = black ? "cell black" : "cell";
+          board.appendChild(cell);
+        }
+      }
+
+      const text = [
+        `OpenCV patternSize = (${innerCols}, ${innerRows})`,
+        `square_size = ${cellMm.toFixed(2)} mm`,
+        `棋盘外尺寸 = ${boardWidthMm.toFixed(1)} x ${boardHeightMm.toFixed(1)} mm`,
+        `估算格子像素 = ${cellPx.toFixed(1)} px`
+      ];
+      info.innerHTML = text.join("<br>");
+      caption.textContent = `${innerCols} x ${innerRows} inner corners, ${cellMm.toFixed(1)} mm squares`;
+    }
+
+    Object.values(fields).forEach((field) => field.addEventListener("input", render));
+    window.addEventListener("resize", render);
+
+    fullscreenBtn.addEventListener("click", async () => {
+      await document.documentElement.requestFullscreen();
+      document.body.classList.add("fullscreen");
+      render();
+    });
+
+    preset16Btn.addEventListener("click", () => {
+      fields.screenWidthMm.value = "344.7";
+      fields.cellMm.value = "28";
+      fields.innerCols.value = "9";
+      fields.innerRows.value = "6";
+      render();
+    });
+
+    fitBtn.addEventListener("click", () => {
+      const screenWidthMm = getNumber(fields.screenWidthMm, 344);
+      const innerCols = Math.max(3, Math.round(getNumber(fields.innerCols, 9)));
+      const innerRows = Math.max(3, Math.round(getNumber(fields.innerRows, 6)));
+      const cols = innerCols + 1;
+      const rows = innerRows + 1;
+      const maxWidthMm = screenWidthMm * 0.82;
+      const maxHeightMm = screenWidthMm * (window.innerHeight / Math.max(window.innerWidth, 1)) * 0.82;
+      const fitCellMm = Math.max(5, Math.min(maxWidthMm / cols, maxHeightMm / rows));
+      fields.cellMm.value = fitCellMm.toFixed(1);
+      render();
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      document.body.classList.toggle("fullscreen", Boolean(document.fullscreenElement));
+      render();
+    });
+
+    invertBtn.addEventListener("click", () => {
+      inverted = !inverted;
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>
