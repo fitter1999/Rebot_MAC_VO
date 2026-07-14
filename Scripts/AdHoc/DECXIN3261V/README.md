@@ -109,6 +109,7 @@ Stop with `Ctrl+C`, then run offline mapping from the saved capture folder. For 
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
   --result Results_decxin3261v_live/<time_dir> \
   --target-fps 3 \
+  --geometry-gate \
   --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
   --timing
 ```
@@ -119,6 +120,7 @@ For a faster comparison, use the default mapping config. It is closer to `MACVO_
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
   --result Results_decxin3261v_live/<time_dir> \
   --target-fps 3 \
+  --geometry-gate \
   --timing
 ```
 

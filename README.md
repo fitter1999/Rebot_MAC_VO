@@ -178,6 +178,7 @@ Saved capture-only stereo sequence to Results_decxin3261v_live/<time_dir>
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
   --result Results_decxin3261v_live/<time_dir> \
   --target-fps 3 \
+  --geometry-gate \
   --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
   --timing
 ```
@@ -188,6 +189,7 @@ Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
 Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
   --result Results_decxin3261v_live/<time_dir> \
   --target-fps 3 \
+  --geometry-gate \
   --timing
 ```
 

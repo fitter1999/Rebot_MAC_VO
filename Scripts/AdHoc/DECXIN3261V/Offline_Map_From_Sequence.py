@@ -14,6 +14,10 @@ import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from Scripts.AdHoc.DECXIN3261V.Diagnose_Sequence import feature_stats, read_gray, sgbm_stats
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,6 +27,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resultRoot", default="./Results_decxin3261v_offline_mapping")
     parser.add_argument("--target-fps", type=float, default=None, help="Subsample the recorded sequence to this approximate FPS before running MAC-VO.")
     parser.add_argument("--stride", type=int, default=1, help="Use every N-th recorded frame before running MAC-VO.")
+    parser.add_argument("--geometry-gate", action="store_true", help="Drop sampled frames whose stereo geometry looks unreliable before running MAC-VO.")
+    parser.add_argument("--min-disp-pos-ratio", type=float, default=0.90)
+    parser.add_argument("--min-sgbm-valid-ratio", type=float, default=0.45)
+    parser.add_argument("--max-depth-median", type=float, default=8.0)
     parser.add_argument("--sampled-dir", default=None, help="Optional output directory for the sampled stereo_sequence.")
     parser.add_argument("--prepare-only", action="store_true", help="Only generate the sampled sequence/config and print the MAC-VO command.")
     parser.add_argument("--seq-from", type=int, default=0)
@@ -74,6 +82,37 @@ def average_fps(times_ns: list[int], indices: list[int]) -> float | None:
     if duration_s <= 0:
         return None
     return (len(indices) - 1) / duration_s
+
+
+def filter_indices_by_geometry(
+    seq: Path,
+    indices: list[int],
+    min_disp_pos_ratio: float,
+    min_sgbm_valid_ratio: float,
+    max_depth_median: float,
+) -> tuple[list[int], list[dict[str, float | int | bool]]]:
+    left_files = sorted((seq / "left").glob("*.png"))
+    right_files = sorted((seq / "right").glob("*.png"))
+    kept: list[int] = []
+    report: list[dict[str, float | int | bool]] = []
+
+    for src_idx in indices:
+        left = read_gray(left_files[src_idx])
+        right = read_gray(right_files[src_idx])
+        row: dict[str, float | int | bool] = {"source_frame_idx": src_idx}
+        row.update(feature_stats(left, right))
+        row.update(sgbm_stats(left, right, fx=456.8243713378906, baseline=0.06))
+        ok = (
+            float(row["disp_pos_ratio"]) >= min_disp_pos_ratio
+            and float(row["sgbm_valid_ratio"]) >= min_sgbm_valid_ratio
+            and float(row["sgbm_depth_median"]) <= max_depth_median
+        )
+        row["kept"] = ok
+        report.append(row)
+        if ok:
+            kept.append(src_idx)
+
+    return kept, report
 
 
 def link_or_copy(src: Path, dst: Path) -> None:
@@ -137,6 +176,15 @@ def build_sampled_sequence(
     return out
 
 
+def write_geometry_report(path: Path, report: list[dict[str, float | int | bool]]) -> None:
+    if not report:
+        return
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(report[0].keys()))
+        writer.writeheader()
+        writer.writerows(report)
+
+
 def main() -> None:
     args = parse_args()
     if args.stride < 1:
@@ -180,8 +228,26 @@ def main() -> None:
     if len(indices) < 2:
         raise ValueError(f"Only selected {len(indices)} frame(s); choose a lower --target-fps or --stride")
 
+    geometry_report: list[dict[str, float | int | bool]] = []
+    if args.geometry_gate:
+        gated_indices, geometry_report = filter_indices_by_geometry(
+            seq,
+            indices,
+            args.min_disp_pos_ratio,
+            args.min_sgbm_valid_ratio,
+            args.max_depth_median,
+        )
+        print(f"Geometry gate: {len(indices)} -> {len(gated_indices)} frames")
+        indices = gated_indices
+        gate_tag = "-gated"
+        sample_tag = f"{sample_tag}{gate_tag}" if sample_tag else gate_tag
+        if len(indices) < 2:
+            raise ValueError("Geometry gate rejected too many frames; relax thresholds.")
+
     if sample_tag:
         sequence_root = build_sampled_sequence(seq, result, indices, sample_tag, args.sampled_dir, times_ns)
+        if geometry_report:
+            write_geometry_report(sequence_root / "geometry_gate_report.csv", geometry_report)
         fps = average_fps(times_ns, indices) if times_ns is not None else None
         fps_text = f", approx_fps={fps:.3f}" if fps is not None else ""
         print(f"Prepared sampled sequence: {source_len} -> {len(indices)} frames{fps_text}")
