@@ -171,24 +171,45 @@ stereo_sequence/     # 只有加 --record-sequence 才有
 
 ### 5. 重新打开保存地图到 Rerun
 
+已有结果不需要接相机，直接用保存目录里的 `poses.npy`、`tensor_map.npz` 和可选的 `stereo_sequence/` 重建 Rerun 视图。
+
 打开最新一次保存结果：
 
 ```bash
 ./run_decxin3261v_view_map_wjy.sh
 ```
 
-按帧重放地图增长、相机位置和 image：
+打开最新一次结果，并按帧重放地图增长、黄色轨迹、相机位置和 image：
 
 ```bash
 ./run_decxin3261v_view_map_wjy.sh --growth
 ```
 
-指定某次结果：
+指定某次已有结果逐帧打开：
 
 ```bash
 ./run_decxin3261v_view_map_wjy.sh \
   --result Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live/<time_dir> \
   --growth
+```
+
+例如：
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live/07_14_015422 \
+  --growth
+```
+
+如果点云太多导致 Rerun 卡顿，可以降低显示点数或跳帧：
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live/<time_dir> \
+  --growth \
+  --every 2 \
+  --image-every 2 \
+  --max-points 150000
 ```
 
 如果没有 `stereo_sequence/`，脚本只能显示 `preview/first_pair_left.png`，不能逐帧显示 image。需要在建图时加 `--record-sequence`。

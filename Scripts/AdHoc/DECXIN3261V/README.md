@@ -83,6 +83,43 @@ For MAC-VO mapping output closer to the project demo point-cloud visualization:
 
 This enables `Odometry.args.mapping: true`, which stores additional `map_points` selected from low-uncertainty stereo depth. It is a dense-mapping-oriented MAC-VO point cloud, but not a fused TSDF/mesh reconstruction.
 
+To save frame images for later Rerun replay, record the sequence while mapping:
+
+```bash
+./run_decxin3261v_mapping_wjy.sh \
+  --useRR \
+  --record-sequence
+```
+
+## 6. Reopen Saved Frame-by-frame Map in Rerun
+
+Open the latest saved mapping result:
+
+```bash
+./run_decxin3261v_view_map_wjy.sh --growth
+```
+
+Open a specific saved result:
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live/<time_dir> \
+  --growth
+```
+
+This replays the growing map points, a single yellow trajectory line, camera pose, and saved images when `stereo_sequence/` exists. If the result was not recorded with `--record-sequence`, only the preview image can be shown.
+
+For smoother playback on large maps:
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_mapping/MACVO-DECXIN3261V-Mapping@DECXIN3261V-live/<time_dir> \
+  --growth \
+  --every 2 \
+  --image-every 2 \
+  --max-points 150000
+```
+
 For quick capture-only testing:
 
 ```bash
@@ -93,7 +130,7 @@ For quick capture-only testing:
   --save-preview-every 1
 ```
 
-## 6. Export Map
+## 7. Export Map
 
 ```bash
 Scripts/AdHoc/DECXIN3261V/export_map.sh --result <result-folder>
