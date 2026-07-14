@@ -146,6 +146,20 @@ OV2710 的流程在 `Scripts/AdHoc/OV2710/` 和对应顶层脚本中，默认实
 ./run_decxin3261v_mapping_wjy.sh --useRR
 ```
 
+如果现在 `640x480 -> 640x480` 默认链路明显比 7 月 13 日晚上的稳定结果漂，可以先跑 legacy 对比链路确认问题是否来自当前标定/输入尺寸变化：
+
+```bash
+./run_decxin3261v_legacy_quality_wjy.sh --useRR
+```
+
+legacy mapping：
+
+```bash
+./run_decxin3261v_legacy_mapping_wjy.sh --useRR
+```
+
+legacy 链路使用旧的 `Calibration/decxin3261v_screen`、`640x400` 校正图和 `480x300` VO 输入，只用于 A/B 排查；默认真实链路仍然是 `Calibration/decxin3261v_screen_640x480` 和 `640x480` VO 输入。
+
 同时保存逐帧输入图像，便于后处理和 Rerun 回放显示 image：
 
 ```bash
@@ -154,15 +168,13 @@ OV2710 的流程在 `Scripts/AdHoc/OV2710/` 和对应顶层脚本中，默认实
   --record-sequence
 ```
 
-拔掉电源或 CUDA 不可用时，推荐先只做 10Hz 图像采集，并用 Rerun 实时看左右目 image。这个模式不运行 MAC-VO，不需要 GPU，因此不会有实时轨迹；轨迹和地图回到室内后离线生成：
+推荐的稳定流程是先高帧率采集，再离线抽帧重建，最后用 Rerun 查看逐帧地图增长。采集阶段只保存校正后的左右目图像，不运行 MAC-VO；这样户外测试时对 GPU 和电源状态更不敏感。
 
 ```bash
 ./run_decxin3261v_live_wjy.sh \
   --capture-only \
   --record-sequence \
-  --useRR \
-  --vo-fps 10 \
-  --rr-every 1 \
+  --vo-fps 30 \
   --status-every 30
 ```
 
@@ -172,37 +184,63 @@ OV2710 的流程在 `Scripts/AdHoc/OV2710/` 和对应顶层脚本中，默认实
 Saved capture-only stereo sequence to Results_decxin3261v_live/<time_dir>
 ```
 
-然后离线建图。大旋转、室内近距离物体较多时，优先使用 paper-like mapping 配置；它对齐原项目 `Paper_Reproduce.yaml` 的 TartanMotionNet 初值、ICP 优化和 outlier filters，同时开启 mapping：
+采集后先检查左右目几何质量：
 
 ```bash
-Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+./run_macvo_wjy.sh python Scripts/AdHoc/DECXIN3261V/Diagnose_Sequence.py \
+  --result Results_decxin3261v_live/<time_dir> \
+  --every 30
+```
+
+优先看 `dy_mad`、`disp_pos_ratio` 和 `sgbm_valid_ratio`。较好的采集通常满足 `dy_mad` 接近 `0`、`disp_pos_ratio` 接近 `1`、`sgbm_valid_ratio` 大约 `0.65` 以上。如果 `dy_mad` 明显大于 `0.5 px`，先检查相机固定、支架形变、画面是否拍到电脑/手/线缆，再重采。
+
+离线重建推荐先用 3Hz legacy mapping。这个版本比全 30Hz 更稳，轨迹会有少量纯 VO 累积漂移，但通常更适合查看地图：
+
+```bash
+./run_decxin3261v_offline_mapping_wjy.sh \
   --result Results_decxin3261v_live/<time_dir> \
   --target-fps 3 \
-  --geometry-gate \
-  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
+  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_LegacyMapping.yaml \
   --timing
 ```
 
-如果需要速度更快的对比，再使用默认 mapping 配置；它接近 `MACVO_Fast.yaml`，使用 StaticMotionModel 和 disp graph，速度更快但在大旋转时更容易漂：
+如果需要默认 mapping 对比：
 
 ```bash
-Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+./run_decxin3261v_offline_mapping_wjy.sh \
   --result Results_decxin3261v_live/<time_dir> \
   --target-fps 3 \
-  --geometry-gate \
   --timing
 ```
 
-如果确认 3Hz 结果稳定，再尝试全帧离线重建；全帧模式会把 10Hz/30Hz 采集序列逐帧送入 MAC-VO，和实时 `--vo-fps 3` 的效果不同：
+如果要测试全帧 30Hz 离线重建，去掉 `--target-fps`。全帧模式会把采集序列逐帧送入 MAC-VO，通常点更多，但可能比 3Hz 更容易累积漂移：
 
 ```bash
-Scripts/AdHoc/DECXIN3261V/offline_map_from_sequence.sh \
+./run_decxin3261v_offline_mapping_wjy.sh \
   --result Results_decxin3261v_live/<time_dir> \
-  --odom Config/Experiment/MACVO/MACVO_DECXIN3261V_PaperLike_Mapping.yaml \
   --timing
 ```
+
+重建完成后，终端会输出新的结果目录。用这个目录在 Rerun 中按帧查看地图增长、黄色轨迹、相机位姿和 image：
+
+```bash
+./run_decxin3261v_view_map_wjy.sh \
+  --result Results_decxin3261v_offline_mapping/<project_name>/<result_time> \
+  --growth
+```
+
+如果诊断或离线重建提示 `Invalid stereo_sequence`，先检查左右图数量：
+
+```bash
+find Results_decxin3261v_live/<time_dir>/stereo_sequence/left -maxdepth 1 -name '*.png' | wc -l
+find Results_decxin3261v_live/<time_dir>/stereo_sequence/right -maxdepth 1 -name '*.png' | wc -l
+```
+
+如果只是最后多出一张孤立图片，删除没有配对的最后一张，再重新诊断和重建。
 
 离线建图默认使用 `Config/Experiment/MACVO/MACVO_DECXIN3261V_Mapping.yaml`，不是 `MACVO_DECXIN3261V_Quality.yaml`。两者使用同一个 `MACVO_FrontendCov.pth` 前端模型和相近的 quality 参数；区别是 Mapping 配置开启了 `mapping: true` 和 `mapping_num_point: 2000`，用于生成逐帧地图点云。Quality 配置默认 `mapping: false`，只适合看轨迹质量，不会输出 dense mapping 点。
+
+新采集的 `stereo_sequence/` 会写入 `metadata.yaml`，离线建图会优先读取采集时的真实内参、基线和图像尺寸。旧采集目录没有这个文件时，脚本会在终端打印当前使用的 fallback camera，避免误以为离线重放完全等同于实时链路。
 
 运行结束时按一次 `Ctrl+C`，等待终端出现：
 
